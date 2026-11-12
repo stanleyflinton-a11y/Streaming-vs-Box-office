@@ -1,0 +1,109 @@
+---
+title: "Did the introduction of streaming services cause a decrease in box office revenue?"
+output: html_notebook
+---
+
+This notebook contains the causal inference section of the project
+
+```{r}
+install.packages('rdrobust')
+library(tidyverse)
+library(lubridate)
+library(rdrobust)
+```
+
+```{r}
+box_office_data <- read.csv("cleaned_box_office_2024.csv") 
+print(head(box_office_data)) 
+```
+
+```{r}
+print(str(box_office_data))
+```
+Based on the EDA performed in Jupyter  notebook the cut off point was chosen to be 2012, this has been judged to be the approximate year that streaming services started to become popular. As shown in the EDA the popularity of streaming services has increased over time so the expected effect of a drop in box office revenue may not be instant.
+
+```{r}
+box_office_data$Release_Date <- ymd(box_office_data$Release_Date)
+print(str(box_office_data))
+```
+
+
+```{r}
+box_office_plot <- box_office_data %>% ggplot(aes(x=Release_Date, y =X.Worldwide)) +
+  geom_point() + theme_bw() + ylab('Box Office Revenue ($)')
+
+box_office_plot # display plot
+```
+```{r}
+cutpoint<- ymd('2012-01-01') #make a variable storing a date 
+
+# Next, add the vertical dashed line at the cutpoint (Jan. 1, 2011): 
+box_office_plot_cp <- box_office_plot + geom_vline(xintercept = as.numeric(cutpoint), linetype = "dashed")
+
+box_office_plot_cp
+```
+
+```{r}
+#add column to crash_data in order to create before and after groups relative to the cutpoint 
+box_office_data_grouped  <- box_office_data %>%  mutate(group = case_when( Release_Date < cutpoint ~ "before", Release_Date >= cutpoint ~ "after_2012"))
+
+#create ggplot 
+box_office_plot_cp_lm <- box_office_data_grouped %>% ggplot(aes(x=Release_Date, y = X.Worldwide)) +
+  geom_point() + 
+  geom_vline(xintercept = as.numeric(cutpoint), linetype = "dashed") +
+  geom_smooth(aes(group = group), color = "yellow", method = lm)
+
+box_office_plot_cp_lm  # display plot
+```
+The plot shows that there is a slight change in the slope suggesting that perhaps there was an impact from streaming services on the growth of box office revenue, there is also a change in the intercept of the cutpoint, further highlighting this point. As we have chosen to use all the data including during Covid, this may be another reason for the change in slope. In the next section we will calculate the appropriate bandwidth and calculate the change more locally. This will likely remove the effect of the lower revenues of covid.
+```{r}
+bandwidths <- (rdbwselect(y=box_office_data$X.Worldwide, x= as.numeric(box_office_data$Release_Date), c = as.numeric(cutpoint)))
+
+bandwidths$bws #show the bandwidths
+```
+Bandwidths are added to a variable and then plotted on the original plot.
+
+```{r}
+bw <- bandwidths$bws[1][1]
+```
+
+```{r}
+box_office_plot + geom_vline(xintercept = as.numeric(cutpoint), linetype = "dashed") + geom_vline(xintercept = as.numeric(cutpoint) + c(bw, -bw))
+```
+```{r}
+box_office_bw <- box_office_data_grouped %>% filter(as.numeric(Release_Date) > (as.numeric(cutpoint) -bw) & as.numeric(Release_Date) < (as.numeric(cutpoint)+bw)) 
+
+box_office_plot + geom_vline(xintercept = as.numeric(cutpoint), linetype = "dashed") + geom_vline(xintercept = as.numeric(cutpoint) + c(bw, -bw)) + geom_smooth(data = box_office_bw, aes(x = Release_Date, y = X.Worldwide, group = group), color = 'yellow', method = lm)
+```
+```{r}
+rda <- rdrobust(y=box_office_data$X.Worldwide, x= as.numeric(box_office_data$Release_Date), c = as.numeric(cutpoint))
+
+print(rda)
+```
+```{r}
+rda$coef
+```
+
+```{r}
+rda$se
+```
+```{r}
+rda$pv
+```
+After calculating the bandwidth and plotting for each bandwidth, there seems to be no statistical difference between 'pre' and 'post' streaming services becoming popular.
+
+## Conclusion and Next Steps
+
+The analysis shows that based on the available data there was no significant change in the box office revenues pre and post streaming services taking off. This is interesting as many people within the industry are saying that there has been an effect.
+
+While we cannot argue with the outcome of this analysis it is important to recognize any potential floors in this analysis, or other variables which may be affecting the outcome. We have spoken about covid as having a large effect on box office revenue in 2020 and perhaps beyond, however there may have been other events which we have not considered which have had similar effects (either positively or negatively) which we are not aware of or have not considered. Knowing whether this data was completely unaffected by outside variables is both impossible and highly unlikely.
+
+While thinking about this we can consider the assumptions of RDA:
+1. The treatment variable impacts the outcome, but not any of the other variables.
+2. The treatment assignment happens only at ONE cutpoint value of the forcing variable.
+3. Treatment assignment is independent of the potential outcomes within a narrow interval around the cutpoint.
+4. Counterfactual outcomes can be modeled within the interval around the cutpoint.
+
+With such a large dataset it hard to be sure we meet these variables. Furthermore with regard to the second assumption, as the use and popularity of streaming services has been increasing since 2011 this may indicate that there is not a clear cutoff point and perhaps fuzzy RDA would have been a better choice for this analysis.
+
+A final point to consider is are there alternative causal analysis methods that could be used which would be more appropriate. This project has been performed as part of my education in data science and therefore my knowledge of other methods may increase in the future to understand how this could be approched better.
